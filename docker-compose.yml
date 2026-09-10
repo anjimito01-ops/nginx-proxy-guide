@@ -1,0 +1,71 @@
+# ============================================================================
+#  Keycloak + PostgreSQL の最小構成
+#
+#    docker compose up -d --build
+#
+#    管理コンソール: http://localhost/admin
+#      ユーザー名: admin
+#      パスワード: admin
+#
+#    docker compose down            # 停止・削除(データは残る)
+#    docker compose down -v         # ボリュームごと削除(realm 設定も消える)
+#
+#  省略しているもの(書かなくても動く):
+#    version:      Compose V2 では廃止
+#    container_name / restart / expose  など、この構成では不要
+# ============================================================================
+
+services:
+
+  # Dockerfile からビルドする唯一のサービス
+  keycloak:
+    build: ./keycloak
+    command: ["start", "--optimized"]   # ビルド済みなので最適化起動できる
+    ports:
+      - "80:8080"                     # ホスト80番 → コンテナ8080番。公開はここだけ
+    environment:
+      # --- 管理コンソール(http://localhost/admin)のログイン情報 ----------------
+      #     ユーザー名: admin
+      #     パスワード: admin
+      #     初回起動時にこの管理者が作成される
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # ----------------------------------------------------------------------
+      KC_DB_URL_HOST: db                   # ← サービス名がそのまま名前解決される
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KC_HOSTNAME_STRICT: false            # HTTP のまま動かすための開発用設定
+      KC_HTTP_ENABLED: true
+    networks:
+      - frontend                           # 外部からのアクセスを受ける側
+      - backend                            # db と通信する側
+    depends_on:
+      db:
+        condition: service_healthy         # DB が接続を受け付けてから起動する
+
+  # 既存イメージをそのまま使うサービス
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    volumes:
+      - db_data:/var/lib/postgresql/data   # ここが無いとコンテナ削除でデータが消える
+    networks:
+      - backend                            # backend だけ = keycloak からしか届かない
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  db_data:
+
+# ---------------------------------------------------------------------------
+# networks: driver は省略すると bridge が使われる。
+#   DMZ と内部LAN を分ける感覚で、公開用と内部用を分けておく。
+# ---------------------------------------------------------------------------
+networks:
+  frontend:
+  backend:
